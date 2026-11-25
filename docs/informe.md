@@ -205,20 +205,23 @@ el pronóstico recursivo le devuelve como rezagos sus propios errores, y un
 
 ## 4. Aprendizaje profundo
 
-**Las tres redes.** Todas se entrenan con la clase `Red`: Adam con tasa
+**Las redes.** Son las tres que pide el enunciado y una cuarta, el MLP
+corto. Todas se entrenan con la clase `Red`: Adam con tasa
 0,01, pérdida MSE, todos los datos a la vez, semilla fija (2026) y entrada y
 salida escaladas con el entrenamiento del origen.
 
 | Red | Arquitectura | Entrada | Parámetros |
 |---|---|---|---:|
 | MLP | 19 → 32 (ReLU) → 1 | las 19 columnas de la tabla, sueltas | 673 |
+| MLP corto | 6 → 32 (ReLU) → 1 | 6 de las 19 columnas: `rezago_1`, `rezago_12`, `mes_sen`, `mes_cos`, `dias` y `festivos` | 257 |
 | LSTM | `nn.LSTM` de una capa con 16 unidades y una capa lineal sobre el último estado oculto | los 12 rezagos como secuencia $(\text{lote}, 12, 1)$, del más viejo al más reciente | 1 233 |
 | Conv1D | `nn.Conv1d` de 8 filtros con núcleo 3 (ReLU) y una capa lineal sobre las $8 \times 10$ salidas | la misma secuencia de 12 rezagos | 113 |
 
 El MLP tiene $19 \cdot 32 + 32 + 32 + 1 = 673$ parámetros; la LSTM,
 $4\,(1 \cdot 16 + 16 \cdot 16 + 2 \cdot 16) + 17 = 1\,233$; la Conv1D,
-$8 \cdot 3 + 8 + 80 + 1 = 113$. Las dos redes de secuencia solo ven los
-rezagos: no reciben el mes, las ventanas ni el calendario.
+$8 \cdot 3 + 8 + 80 + 1 = 113$; el MLP corto, $6 \cdot 32 + 32 + 32 + 1 =
+257$. Las dos redes de secuencia solo ven los rezagos: no reciben el mes,
+las ventanas ni el calendario.
 
 **La tercera red es una Conv1D.** Se eligió por el tamaño de la serie: cada
 filtro mira tres meses seguidos y se desliza por los doce, así que los
@@ -228,45 +231,78 @@ tendría varias veces más parámetros que filas, y un híbrido sobre los
 residuos del SARIMAX tenía poco que aprender: en el miniproyecto 1 esos
 residuos pasaron Ljung-Box como ruido blanco.
 
+**El MLP corto** es una cuarta red que se agregó al ver las curvas de
+pérdida. Es el mismo MLP, pero de las 19 columnas de la tabla solo lee
+seis: los dos rezagos que usa el SARIMAX (el 1 y el 12, los de la PACF del
+miniproyecto 1), el mes y el calendario. La tabla no cambia. La pregunta
+que responde es si el sobreajuste del MLP viene de darle doce rezagos y
+tres ventanas, muy parecidos entre sí, con tan pocas filas.
+
 ![Curvas de pérdida](../figuras/perdida.png)
 
 **Validación.** Tabla con `serie.iloc[:-24]`; se entrena con 72 filas, hasta
 2022-12, y se valida con las 12 de 2023, todas anteriores al *backtest*.
 Cada candidata se entrena 300 épocas y se queda con la época de menor
 pérdida de validación (`resultados/validacion_redes.csv`, pérdida sobre el
-objetivo escalado):
+objetivo escalado). Para leer la escala: pronosticar siempre la media del
+entrenamiento da 1,100 (la línea punteada horizontal de la figura), repetir
+la diferencia del mes anterior da 0,455 y suponer crecimiento cero, que es
+el estacional ingenuo, da 2,456.
 
 | Candidata | Parámetros | Época elegida | Validación en esa época | Entrenamiento en esa época | Validación en la época 300 | Entrenamiento en la época 300 |
 |---|---:|---:|---:|---:|---:|---:|
 | MLP (8 ocultas) | 169 | 12 | 0,604 | 0,477 | 2,625 | 0,002 |
 | MLP (16 ocultas) | 337 | 10 | 0,532 | 0,534 | 3,349 | 0,000 |
 | **MLP (32 ocultas)** | 673 | **15** | **0,515** | 0,344 | 3,386 | 0,000 |
+| MLP corto (8 ocultas) | 65 | 95 | 0,415 | 0,306 | 0,527 | 0,154 |
+| **MLP corto (32 ocultas)** | 257 | **273** | **0,355** | 0,024 | 0,373 | 0,020 |
 | LSTM (16 ocultas) | 1 233 | 59 | 0,359 | 0,306 | 2,672 | 0,045 |
 | Conv1D (8 filtros) | 113 | 72 | 0,514 | 0,200 | 2,827 | 0,047 |
 
-**Lectura de las curvas.** El sobreajuste empieza casi de inmediato. En los
-tres MLP la validación toca fondo entre las épocas 10 y 15 y desde ahí
-sube, mientras el entrenamiento sigue bajando hasta cero: en la época 300
-el MLP de 32 tiene pérdida de entrenamiento 0,000 y de validación 3,386,
-más de seis veces su mínimo. Con 673 parámetros y 72 filas, la red se
-aprende las filas de memoria. La LSTM y la Conv1D, que solo reciben 12
-rezagos, tardan más (épocas 59 y 72) y sobreajustan menos, pero el dibujo
-es el mismo. Quedan **MLP de 32 ocultas con 15 épocas** (el de menor
-pérdida de validación entre los tres tamaños), **LSTM con 59** y **Conv1D
-con 72**. La diferencia entre los tres MLP es pequeña (0,604, 0,532 y
-0,515) frente a lo que cambia una red con otra semilla, como se ve abajo.
+**Lectura de las curvas.** En las redes que reciben muchas entradas el
+sobreajuste empieza casi de inmediato. En los tres MLP de 19 columnas la
+validación toca fondo entre las épocas 10 y 15 y desde ahí sube, mientras
+el entrenamiento sigue bajando hasta cero: en la época 300 el MLP de 32
+tiene pérdida de entrenamiento 0,000 y de validación 3,386, más de seis
+veces su mínimo y peor que pronosticar crecimiento cero (2,456). La red se
+aprendió las 72 filas de memoria. La LSTM y la Conv1D, que reciben los 12
+rezagos, tardan más (épocas 59 y 72) y terminan igual, en 2,7 y 2,8. Por
+eso ninguna se entrena hasta el final: cada una entra al *backtest* con las
+épocas de su mínimo, la línea punteada vertical.
 
-**Las tres en el *backtest*.**
+El MLP corto muestra de dónde viene el sobreajuste. Con las mismas 32
+neuronas y solo 6 entradas, la validación baja a 0,355 y se queda ahí
+(0,373 en la época 300): no hay rebote, aunque tiene 257 parámetros para 72
+filas. Lo que le permite a la red memorizar no es tanto el número de
+parámetros como el número de entradas: doce rezagos y tres ventanas que
+dicen casi lo mismo. Con 6 entradas el mínimo es mejor que repetir el mes
+anterior (0,455); con 19, peor (0,515).
+
+Quedan, de cada familia, la de menor pérdida de validación: **MLP de 32
+ocultas con 15 épocas**, **MLP corto de 32 ocultas con 273 épocas**, **LSTM
+con 59** y **Conv1D con 72**. Entre los tres tamaños del MLP la diferencia
+es pequeña (0,604, 0,532 y 0,515) frente a lo que cambia una red con otra
+semilla, como se ve abajo.
+
+**Las cuatro en el *backtest*.**
 
 | Red | RMSE | MAE | MAPE (%) |
 |---|---:|---:|---:|
 | MLP (32 ocultas), 15 épocas | 188,33 | 159,03 | 2,33 |
 | LSTM (16 ocultas), 59 épocas | 208,00 | 181,22 | 2,66 |
+| MLP corto (32 ocultas), 273 épocas | 216,92 | 170,63 | 2,48 |
 | Conv1D (8 filtros), 72 épocas | 223,23 | 191,06 | 2,81 |
 
-La LSTM tuvo la mejor validación (0,359) y no la mejor prueba: la
-validación mide un mes adelante con rezagos reales, y el *backtest* mide
-doce meses encadenando pronósticos.
+**Una curva de pérdida sana no dio un mejor pronóstico a 12 meses.** El MLP
+corto y la LSTM tuvieron las mejores validaciones (0,355 y 0,359) y quedan
+por detrás del MLP de 19 columnas, el de peor validación de los cuatro. La
+razón es qué mide cada cosa: la validación mide un mes adelante con rezagos
+reales, y el *backtest* mide doce meses encadenando pronósticos. El MLP
+corto es de hecho el mejor de toda la tabla a un mes, con error absoluto
+medio de 130,8 GWh contra 136,1 del SARIMAX, pero a doce meses llega a
+176,6 contra 89,8 (`resultados/error_por_horizonte.csv`): su entrada
+principal es `rezago_1`, y desde el segundo paso ese rezago es su propio
+pronóstico.
 
 **La mejor red con cinco semillas.** El MLP de 32 ocultas y 15 épocas, cada
 semilla por el *backtest* completo (`resultados/semillas.csv`):
@@ -295,18 +331,19 @@ de dónde arrancó. El SARIMAX da 131,11 todas las veces.
 
 | Modelo | RMSE | MAE | MAPE (%) | Parámetros | Segundos |
 |---|---:|---:|---:|---:|---:|
-| SARIMAX(1,1,1)(1,0,1,12) + días y festivos | **131,11** | **108,09** | **1,59** | 7 | 5,5 |
+| SARIMAX(1,1,1)(1,0,1,12) + días y festivos | **131,11** | **108,09** | **1,59** | 7 | 7,7 |
 | estacional ingenuo | 182,26 | 153,20 | 2,22 | 0 | 0,0 |
-| MLP (32 ocultas), 15 épocas | 188,33 | 159,03 | 2,33 | 673 | 1,2 |
-| KNN | 189,40 | 153,33 | 2,26 | 1 824 | 1,0 |
-| SVR | 190,24 | 161,56 | 2,38 | 1 841 | 1,2 |
+| MLP (32 ocultas), 15 épocas | 188,33 | 159,03 | 2,33 | 673 | 1,1 |
+| KNN | 189,40 | 153,33 | 2,26 | 1 824 | 1,1 |
+| SVR | 190,24 | 161,56 | 2,38 | 1 841 | 1,0 |
 | LSTM (16 ocultas), 59 épocas | 208,00 | 181,22 | 2,66 | 1 233 | 2,4 |
+| MLP corto (32 ocultas), 273 épocas | 216,92 | 170,63 | 2,48 | 257 | 2,6 |
 | Conv1D (8 filtros), 72 épocas | 223,23 | 191,06 | 2,81 | 113 | 1,6 |
-| Random Forest | 241,16 | 205,69 | 3,01 | 1 436 | 3,7 |
-| XGBoost | 277,69 | 245,44 | 3,59 | 1 372 | 1,5 |
+| Random Forest | 241,16 | 205,69 | 3,01 | 1 436 | 3,2 |
+| XGBoost | 277,69 | 245,44 | 3,59 | 1 372 | 1,4 |
 
 Los segundos son los del *backtest* completo de cada modelo (13 ajustes) y
-cambian de una máquina a otra. **Ninguno de los siete modelos nuevos supera
+cambian de una máquina a otra. **Ninguno de los ocho modelos nuevos supera
 al SARIMAX, y con la semilla de la tabla ninguno supera tampoco al
 estacional ingenuo.**
 
@@ -332,10 +369,11 @@ se frena. Se ve en el sesgo, el promedio de pronóstico menos real sobre los
 | Random Forest | $+85{,}4$ | noviembre | 298,3 | 2024-04 | 287,0 |
 | XGBoost | $+81{,}1$ | noviembre | 354,6 | 2024-03 | 374,2 |
 | MLP | $+15{,}8$ | junio | 298,8 | 2024-04 | 284,8 |
+| MLP corto | $+69{,}9$ | marzo | 377,4 | 2024-12 | 300,8 |
 | LSTM | $+120{,}2$ | noviembre | 264,6 | 2024-03 | 345,4 |
 | Conv1D | $+115{,}0$ | febrero | 349,5 | 2023-12 | 317,1 |
 
-Seis de los siete modelos nuevos pronostican entre 81 y 120 GWh de más. El
+Siete de los ocho modelos nuevos pronostican entre 70 y 120 GWh de más. El
 estacional ingenuo, que supone crecimiento cero, se queda 81,5 GWh corto: el
 crecimiento real quedó entre lo uno y lo otro. El SARIMAX también se pasa,
 pero solo 34,8 GWh, porque su diferencia regular se corrige con el último
@@ -346,21 +384,28 @@ de crecer 7,8 % interanual y se frenó.
 
 ![Dónde falla cada modelo](../figuras/errores.png)
 
-*2. Hay más parámetros que meses.* En el último origen hay 120 meses y,
-tras la diferencia y los rezagos, **96 filas**. El SARIMAX ajusta 7
-parámetros con 120 meses, unos 17 meses por parámetro. El MLP ajusta 673
-con 96 filas y la LSTM 1 233: entre 7 y 13 parámetros por fila. La curva de
-pérdida lo muestra: la validación empieza a subir en la época 15 y la red
-puede llevar el error de entrenamiento a cero. La Conv1D, con 113
-parámetros, es la única red con un tamaño parecido al de los datos, y
-tampoco alcanza: le faltan el calendario y el nivel, no parámetros.
+*2. Hay pocos meses para lo que se les pide aprender.* En el último origen
+hay 120 meses y, tras la diferencia y los rezagos, **96 filas**. El SARIMAX
+ajusta 7 parámetros con 120 meses, unos 17 meses por parámetro. El MLP
+ajusta 673 con 96 filas y la LSTM 1 233: entre 7 y 13 parámetros por fila.
+La curva de pérdida lo muestra: con 19 entradas la validación empieza a
+subir en la época 15 y la red lleva el error de entrenamiento a cero. Pero
+el sobreajuste no es toda la explicación. El MLP corto no se sobreajusta en
+la validación y pierde igual en el *backtest* (216,92), y la Conv1D, con
+113 parámetros, también (223,23). Corregir la curva no corrigió el
+pronóstico: lo que les falta no se arregla con menos entradas ni con menos
+parámetros, sino con más años que muestren un cambio de ritmo como el de
+2024.
 
 *3. El calendario se pierde con la diferencia de 12.* El SARIMAX trabaja en
 nivel y `dias` le dice cada mes cuántos días tiene. En la tabla, `dias` y
 `festivos` son diferencias con el año anterior y casi siempre valen cero.
 Por eso marzo, donde cae o no la Semana Santa, es el peor mes del KNN (MAE
-292,1 GWh) y de la SVR (289,2), contra 159,9 del SARIMAX, y febrero es el
-peor de la Conv1D (349,5), que no recibe el calendario.
+292,1 GWh), de la SVR (289,2) y del MLP corto (377,4), contra 159,9 del
+SARIMAX, y febrero es el peor de la Conv1D (349,5), que no recibe el
+calendario. El MLP corto sí recibe `festivos`, pero en la tabla solo hay
+unos pocos marzos y abriles con la Semana Santa cambiada de mes para
+aprender cuánto pesa.
 
 *4. La variación entre semillas es del tamaño de la diferencia.* La mejor
 red cambia 25,48 GWh de desviación con solo cambiar la semilla, más que los
@@ -379,18 +424,19 @@ Lo que se paga por cada lado:
 | | SARIMAX | MLP (la mejor red) | KNN (el mejor de aprendizaje automático) |
 |---|---|---|---|
 | Datos | Usa los 120 meses del origen; 7 parámetros | Pierde 24 meses por la diferencia y los rezagos: 96 filas para 673 parámetros | 96 filas; guarda las 96 × 19 = 1 824 cifras de la tabla |
-| Tiempo del *backtest* | 5,5 s | 1,2 s | 1,0 s |
+| Tiempo del *backtest* | 7,7 s | 1,1 s | 1,1 s |
 | Qué tanto se explica | Cada coeficiente se lee: un día más de mes son unos 180 GWh, un festivo unos 33 menos, y $\Phi_1$ es la memoria anual | No se lee: 673 pesos, y el pronóstico cambia con la semilla (de 128 a 188 GWh de RMSE) | Se puede mostrar a qué 15 meses pasados se parece el mes, pero no por qué |
 | Se repite | Siempre da 131,11 | Desviación de 25,5 GWh entre semillas | Siempre da 189,40 |
 
-Elegir el SARIMAX cuesta lo único en que pierde, el tiempo: 5,5 segundos
+Elegir el SARIMAX cuesta lo único en que pierde, el tiempo: 7,7 segundos
 contra cerca de uno, que para un pronóstico mensual no pesa. A cambio da el
 menor error, usa todos los meses, no depende de una semilla y sus
 coeficientes se le pueden explicar a quien use el pronóstico.
 
 El resultado no dice que las redes no sirvan para esta serie, sino que con
 132 meses no hay con qué ajustarlas. Dos de las cinco semillas del MLP
-quedan a la altura del SARIMAX (128,07 y 131,68), así que un promedio de
-varias semillas, o una red que reciba el calendario en nivel como lo recibe
-el SARIMAX, serían lo siguiente por probar. Con lo medido aquí, y con el
+quedan a la altura del SARIMAX (128,07 y 131,68), así que promediar varias
+semillas sería lo siguiente por probar. Lo que ya se probó y no alcanzó fue
+quitarle entradas a la red: el MLP corto deja de sobreajustarse y pronostica
+mejor que el SARIMAX a un mes, pero no a doce. Con lo medido aquí, y con el
 mismo *backtest* para todos, el modelo clásico sigue siendo el mejor.

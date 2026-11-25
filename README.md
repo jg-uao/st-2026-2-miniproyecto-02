@@ -31,9 +31,9 @@ del grupo. Si falta algún dato, se advierte en la realimentación.
 
 | Nombre completo | Código | Correo institucional |
 |---|---|---|
-| | | |
-| | | |
-| | | |
+| Nilson Jacob Gonzalez Campo | 22500452 | nilson_jac.gonzalez@uao.edu.co |
+
+Entrega individual.
 
 ## Entrega
 

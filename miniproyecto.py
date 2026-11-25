@@ -427,9 +427,11 @@ def graficar_importancia(serie, elegidos):
     (feature_importances_), ajustados con lo elegido sobre toda la serie."""
     X, z = filas_completas(serie)
     figura, ejes = plt.subplots(1, 2, figsize=(10, 4.6), sharey=True)
+    todas = {}
     for eje, (nombre, fabrica) in zip(ejes, [("Random Forest", bosque), ("XGBoost", xgboost)]):
         ajustado = fabrica(**elegidos[nombre]).fit(X, z)
         importancia = pd.Series(ajustado.feature_importances_, index=X.columns)
+        todas[nombre] = importancia
         eje.barh(importancia.index[::-1], importancia.to_numpy()[::-1])
         eje.set_title(f"{nombre}: importancia de las variables")
         mayores = importancia.sort_values(ascending=False).head(5)
@@ -438,6 +440,7 @@ def graficar_importancia(serie, elegidos):
               + f"; dias {importancia['dias']:.3f}, festivos {importancia['festivos']:.3f}")
     figura.tight_layout()
     figura.savefig(FIGURAS / "importancia.png", dpi=120)
+    pd.DataFrame(todas).round(3).rename_axis("variable").to_csv(RESULTADOS / "importancia.csv")
     plt.close(figura)
 
 

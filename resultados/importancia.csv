@@ -1,0 +1,20 @@
+variable,Random Forest,XGBoost
+rezago_1,0.608,0.293
+rezago_2,0.042,0.04
+rezago_3,0.025,0.012
+rezago_4,0.062,0.129
+rezago_5,0.014,0.035
+rezago_6,0.008,0.018
+rezago_7,0.001,0.023
+rezago_8,0.014,0.027
+rezago_9,0.01,0.015
+rezago_10,0.018,0.005
+rezago_11,0.028,0.079
+rezago_12,0.072,0.111
+media_3,0.038,0.056
+media_12,0.009,0.036
+desv_12,0.032,0.05
+mes_sen,0.012,0.008
+mes_cos,0.005,0.009
+dias,0.001,0.052
+festivos,0.0,0.002

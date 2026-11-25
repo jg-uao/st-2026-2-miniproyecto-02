@@ -2,5 +2,7 @@ red,epocas,validacion,entrenamiento,parametros,validacion_final,entrenamiento_fi
 MLP (8 ocultas),12.0,0.6045,0.4772,169.0,2.6252,0.002
 MLP (16 ocultas),10.0,0.5322,0.5341,337.0,3.3488,0.0
 MLP (32 ocultas),15.0,0.5155,0.3442,673.0,3.3859,0.0001
+MLP corto (8 ocultas),95.0,0.4153,0.3057,65.0,0.5271,0.1542
+MLP corto (32 ocultas),273.0,0.3547,0.024,257.0,0.3733,0.0195
 LSTM (16 ocultas),59.0,0.3593,0.3065,1233.0,2.672,0.045
 Conv1D (8 filtros),72.0,0.5144,0.1997,113.0,2.8275,0.0474

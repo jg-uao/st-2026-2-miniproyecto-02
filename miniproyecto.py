@@ -513,6 +513,32 @@ class MLP(nn.Module):
         return self.capas(x)
 
 
+# Las 6 columnas que lee el MLP corto: los dos rezagos que usa el SARIMAX
+# (el 1 y el 12, los de la PACF del miniproyecto 1), el mes y el calendario.
+ENTRADAS_CORTAS = ["rezago_1", "rezago_12", "mes_sen", "mes_cos", "dias", "festivos"]
+
+
+class MLPCorto(nn.Module):
+    """El mismo MLP, que de las columnas de la tabla solo lee ENTRADAS_CORTAS.
+
+    La tabla no cambia: la red recibe sus 19 columnas ya escaladas y se
+    queda con 6. Con 72 a 96 filas, los doce rezagos y las ventanas, muy
+    parecidos entre sí, le dan a la red con qué aprenderse el entrenamiento
+    de memoria.
+    """
+
+    def __init__(self, entradas, ocultas=16):
+        super().__init__()
+        meses = pd.date_range("2000-01-01", periods=2, freq="MS")
+        columnas = list(tabla_supervisada(pd.Series(0.0, index=meses)).columns)
+        assert len(columnas) == entradas
+        self.indices = [columnas.index(nombre) for nombre in ENTRADAS_CORTAS]
+        self.mlp = MLP(len(self.indices), ocultas)
+
+    def forward(self, x):
+        return self.mlp(x[:, self.indices])
+
+
 class LSTM(nn.Module):
     """nn.LSTM de una capa sobre la secuencia (lote, 12, 1) y una capa lineal
     que lee el último estado oculto."""
@@ -546,13 +572,16 @@ class Conv1D(nn.Module):
         return self.salida(mapas.flatten(1))
 
 
-# Las candidatas: nombre, cómo se construye y si recibe la secuencia. Entre
-# los MLP la validación deja uno solo; la LSTM y la Conv1D reciben los 12
+# Las candidatas: nombre, cómo se construye y si recibe la secuencia. Hay dos
+# familias de MLP, el que lee las 19 columnas y el corto, que lee 6; la
+# validación deja un tamaño de cada una. La LSTM y la Conv1D reciben los 12
 # rezagos como secuencia.
 CANDIDATAS = {
     "MLP (8 ocultas)": (lambda n: MLP(n, 8), False),
     "MLP (16 ocultas)": (lambda n: MLP(n, 16), False),
     "MLP (32 ocultas)": (lambda n: MLP(n, 32), False),
+    "MLP corto (8 ocultas)": (lambda n: MLPCorto(n, 8), False),
+    "MLP corto (32 ocultas)": (lambda n: MLPCorto(n, 32), False),
     "LSTM (16 ocultas)": (lambda n: LSTM(16), True),
     "Conv1D (8 filtros)": (lambda n: Conv1D(8), True),
 }
@@ -563,16 +592,30 @@ def validar_redes(serie):
 
     La tabla se arma con serie.iloc[:-N_PRUEBA] y sus últimos 12 meses son la
     validación. Cada candidata se entrena EPOCAS_MAXIMAS épocas y se queda
-    con la época de menor pérdida de validación. Entre los MLP queda el de
-    menor pérdida de validación. Las curvas van a figuras/perdida.png.
+    con la época de menor pérdida de validación. De cada familia de MLP queda
+    el tamaño de menor pérdida de validación. Las curvas van a
+    figuras/perdida.png, y resultados/validacion_redes.csv guarda además con
+    qué se compara esa pérdida.
     """
     X, z = filas_completas(serie.iloc[:-N_PRUEBA])
     X_ent, z_ent, X_val, z_val = X.iloc[:-PERIODO], z.iloc[:-PERIODO], X.iloc[-PERIODO:], z.iloc[-PERIODO:]
     print(f"  entrenamiento: {len(X_ent)} filas hasta {X_ent.index[-1]:%Y-%m}; "
           f"validación: {X_val.index[0]:%Y-%m} a {X_val.index[-1]:%Y-%m}")
+    # Con qué se compara la pérdida, en la misma escala: pronosticar la media
+    # del entrenamiento, repetir la diferencia del mes anterior y crecimiento
+    # cero, que es el estacional ingenuo.
+    escalado = lambda p: float(np.mean(((p - z_val) / z_ent.std()) ** 2))  # noqa: E731
+    referencias = {"media del entrenamiento": escalado(z_ent.mean()),
+                   "repetir el mes anterior": escalado(X_val["rezago_1"]),
+                   "crecimiento cero": escalado(0.0)}
+    print("  referencias de la pérdida de validación: "
+          + ", ".join(f"{k} {v:.3f}" for k, v in referencias.items()))
     resumen = {}
-    figura, ejes = plt.subplots(1, len(CANDIDATAS), figsize=(3.1 * len(CANDIDATAS), 3.3),
-                                sharey=True)
+    columnas = 4
+    figura, cuadros = plt.subplots(2, columnas, figsize=(3.3 * columnas, 6.2), sharey=True)
+    ejes = cuadros.ravel()
+    for eje in ejes[len(CANDIDATAS):]:
+        eje.axis("off")
     for eje, (nombre, (construir, secuencia)) in zip(ejes, CANDIDATAS.items()):
         ajustada = Red(construir, secuencia).fit(X_ent, z_ent, X_val, z_val)
         curvas = np.asarray(ajustada.perdidas)
@@ -587,10 +630,12 @@ def validar_redes(serie):
         eje.plot(range(1, len(curvas) + 1), curvas[:, 0], label="entrenamiento")
         eje.plot(range(1, len(curvas) + 1), curvas[:, 1], label="validación")
         eje.axvline(mejor + 1, color="gray", linestyle="--", lw=0.8)
+        eje.axhline(referencias["media del entrenamiento"], color="gray", linestyle=":", lw=0.8)
         eje.set_yscale("log")
         eje.set_title(f"{nombre}\n{mejor + 1} épocas", fontsize=9)
         eje.set_xlabel("época")
-    ejes[0].set_ylabel("MSE (objetivo escalado)")
+    for fila_de_ejes in cuadros:
+        fila_de_ejes[0].set_ylabel("MSE (objetivo escalado)")
     ejes[0].legend(fontsize=8)
     figura.tight_layout()
     figura.savefig(FIGURAS / "perdida.png", dpi=120)
@@ -598,11 +643,17 @@ def validar_redes(serie):
     tabla = pd.DataFrame(resumen).T.round(4)
     tabla.index.name = "red"
     tabla.to_csv(RESULTADOS / "validacion_redes.csv")
+    pd.Series(referencias, name="validacion").round(4).rename_axis("referencia").to_csv(
+        RESULTADOS / "validacion_referencias.csv")
 
-    mlp = min((n for n in resumen if n.startswith("MLP")), key=lambda n: resumen[n]["validacion"])
-    print(f"  MLP elegido: {mlp}")
-    return {nombre: int(datos["epocas"]) for nombre, datos in resumen.items()
-            if nombre == mlp or not nombre.startswith("MLP")}
+    # De cada familia (el texto antes del paréntesis) queda la candidata de
+    # menor pérdida de validación.
+    familias = {}
+    for nombre in resumen:
+        familias.setdefault(nombre.split(" (")[0], []).append(nombre)
+    elegidas = [min(nombres, key=lambda n: resumen[n]["validacion"]) for nombres in familias.values()]
+    print("  elegidas: " + ", ".join(elegidas))
+    return {nombre: int(resumen[nombre]["epocas"]) for nombre in elegidas}
 
 
 def red(nombre, epocas, semilla=SEMILLA):

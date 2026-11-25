@@ -1,0 +1,6 @@
+red,semilla,RMSE,MAE,MAPE
+MLP (32 ocultas),2026,188.33,159.03,2.33
+MLP (32 ocultas),2027,169.37,143.29,2.11
+MLP (32 ocultas),2028,150.39,121.78,1.78
+MLP (32 ocultas),2029,128.07,107.49,1.56
+MLP (32 ocultas),2030,131.68,105.58,1.54

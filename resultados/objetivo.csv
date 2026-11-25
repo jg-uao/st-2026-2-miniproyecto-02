@@ -1,0 +1,5 @@
+modelo,nivel,dif12
+KNN,352.11,180.14
+SVR,717.34,163.69
+Random Forest,371.51,242.83
+XGBoost,362.93,306.9
